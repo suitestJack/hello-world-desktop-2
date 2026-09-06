@@ -85,7 +85,15 @@ pipeline {
         // gh has no current branch to infer the PR from -- pass CHANGE_ID
         // (the PR number, set by github-branch-source for PR builds)
         // explicitly rather than relying on branch inference.
-        sh 'gh pr merge "$CHANGE_ID" --squash --auto'
+        //
+        // No --auto: that defers the merge until GitHub's own required
+        // checks report success, which needs "Allow auto-merge" enabled on
+        // the repo (it isn't) and is the wrong semantics here anyway --
+        // Install/Test/Build above are this PR's only gate, and they've
+        // already passed by the time this stage runs, so merge immediately.
+        // Matches the release-candidate/production-promote merge in
+        // jenkins/jenkins.yaml, which never used --auto either.
+        sh 'gh pr merge "$CHANGE_ID" --squash'
 
         // Promote the merge straight to beta. Branches make batching free:
         // this is a fast-forward, not a rebuild -- beta always mirrors dev.
