@@ -86,20 +86,19 @@ pipeline {
         // (the PR number, set by github-branch-source for PR builds)
         // explicitly rather than relying on branch inference.
         //
-        // No --auto: that defers the merge until GitHub's own required
-        // checks report success, which needs "Allow auto-merge" enabled on
-        // the repo (it isn't) and is the wrong semantics here anyway --
-        // Install/Test/Build above are this PR's only gate, and they've
-        // already passed by the time this stage runs, so merge immediately.
-        // Matches the release-candidate/production-promote merge in
-        // jenkins/jenkins.yaml, which never used --auto either.
-        //
-        // --admin: the target branch's protection rules otherwise refuse a
-        // direct merge ("the base branch policy prohibits the merge") --
-        // by design (see the top of this file) Jenkins' own test gate is
-        // the only gate a ticket branch needs, so bypass the platform-level
-        // review/status-check requirement rather than adding a human step.
-        sh 'gh pr merge "$CHANGE_ID" --squash --admin'
+        // --auto, not a direct merge: this build's own outcome is what the
+        // target branch's required status check is waiting on, so trying to
+        // merge immediately is circular -- the check can't be "success" yet
+        // because this build (which reports it) hasn't finished. --auto
+        // queues GitHub's native auto-merge instead, which completes later,
+        // asynchronously, once this same build posts its final status.
+        // Requires "Allow auto-merge" enabled on the repo, and the target
+        // branch's required check must name the context a PR build actually
+        // posts (continuous-integration/jenkins/pr-merge, not .../branch --
+        // that context only ever comes from a direct non-PR build of the
+        // target branch itself, which never happens while a PR is open,
+        // per gitHubBranchDiscovery's config in jenkins/jenkins.yaml).
+        sh 'gh pr merge "$CHANGE_ID" --squash --auto'
 
         // Promote the merge straight to beta. Branches make batching free:
         // this is a fast-forward, not a rebuild -- beta always mirrors dev.
