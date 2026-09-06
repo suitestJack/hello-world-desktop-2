@@ -88,8 +88,15 @@ pipeline {
         // Traefik on the Beta VM under that same hostname (beta-vm/README.md).
         // TODO: replace yourdomain.com with this project's actual BETA_DOMAIN
         // once it's provisioned.
+        //
+        // jira:3.21's jiraComment step only takes issueKey/body — there is
+        // no `site` param on this plugin version (it assumes the sole
+        // globally-configured Jira site) — and the plugin has no
+        // jiraTransition step at all. So the transition below goes through
+        // Jira's REST API directly instead, the same way jira.js's own
+        // transitionIssue() does: look up the transition id whose target
+        // status is "In Review" by name, then fire it.
         jiraComment(
-          site: 'ai-gang-jira',
           issueKey: "${JIRA_TICKET}",
           body: "Deployed to beta.\n\nBeta URL: https://${env.PROJECT_NAME}.beta.yourdomain.com\nSHA: ${env.DEPLOYED_SHA}\nBuild: ${env.BUILD_IDENTIFIER}"
         )
@@ -97,11 +104,19 @@ pipeline {
         // Evidence is posted -- now, and only now, move the ticket to In
         // Review. This is the single place a ticket leaves In Progress on
         // the happy path (REQ-10).
-        jiraTransition(
-          site: 'ai-gang-jira',
-          issueKey: "${JIRA_TICKET}",
-          transitionId: 'In Review'
-        )
+        sh '''
+          TRANSITION_ID=$(curl -s -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+              "$JIRA_URL/rest/api/3/issue/$JIRA_TICKET/transitions" \
+            | jq -r '.transitions[] | select(.to.name=="In Review") | .id')
+          if [ -z "$TRANSITION_ID" ]; then
+            echo "No In Review transition available for $JIRA_TICKET" >&2
+            exit 1
+          fi
+          curl -s -u "$JIRA_EMAIL:$JIRA_TOKEN" -X POST \
+              -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg id "$TRANSITION_ID" '{transition:{id:$id}}')" \
+              "$JIRA_URL/rest/api/3/issue/$JIRA_TICKET/transitions"
+        '''
       }
     }
   }
@@ -116,7 +131,6 @@ pipeline {
           // message never names an agent (REQ-11) -- ScrumMaster is the only
           // thing allowed to decide who that is.
           jiraComment(
-            site: 'ai-gang-jira',
             issueKey: "${JIRA_TICKET}",
             body: "Pipeline failed. Build log: ${env.BUILD_URL}\n\nPlease review and fix."
           )
