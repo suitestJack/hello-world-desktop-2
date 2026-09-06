@@ -1,23 +1,23 @@
 # hello-world-desktop-2 — Project Map
 
-<!-- Fill in each section before the first agent runs.
-     Agents use this file to locate files efficiently — keep it concise.
-     Update at the directory/pattern level when structure changes; not individual files. -->
-
 ## Framework / Runtime
-<!-- e.g. Node 22 + Express, plain HTML/CSS, React + Vite, Python 3.11 + FastAPI -->
+React 19 + Vite 7 web frontend; Tauri 2 + Rust native shell.
 
 ## Key Directories
-<!--
-- src/           — application source
--->
+- `src/` — shared React UI, runnable in browser and native shell
+- `src-tauri/` — Rust entry point, Tauri capabilities, and bundle configuration
+- `.github/workflows/` — Jenkins-dispatched native build workflow
 
 ## Entry Points
-<!-- e.g. src/index.html, src/index.js, src/app.py -->
+- `index.html` and `src/main.jsx` — web application
+- `src-tauri/src/main.rs` — native application
 
 ## Conventions
-<!-- Non-obvious patterns agents need to follow:
-     e.g. CSS modules, named exports only, all API responses wrapped in { data, error } -->
+Keep shared UI browser-compatible. Isolate native API calls behind adapters.
 
 ## Test Framework
-<!-- e.g. Jest + React Testing Library, pytest, or "none configured" -->
+No unit-test framework configured. `npm run build` is the web build gate.
+
+## Available Agents
+- frontend (suffix: frontend)
+- devops (suffix: devops)
