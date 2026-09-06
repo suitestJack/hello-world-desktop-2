@@ -30,8 +30,14 @@ pipeline {
   }
 
   environment {
+    // For a PR-triggered multibranch build, BRANCH_NAME is the PR
+    // pseudo-branch (PR-1, PR-2, ...) -- the real head branch name is
+    // CHANGE_BRANCH instead. Since gitHubBranchDiscovery excludes branches
+    // that already have an open PR (jenkins/jenkins.yaml), every build that
+    // reaches this stage is a PR build, so CHANGE_BRANCH must take priority.
+    //
     // feature/GANG-42-password-reset -> GANG-42
-    JIRA_TICKET = "${env.BRANCH_NAME?.contains('/') ? env.BRANCH_NAME.split('/')[1].tokenize('-')[0..1].join('-') : ''}"
+    JIRA_TICKET = "${(env.CHANGE_BRANCH ?: env.BRANCH_NAME)?.contains('/') ? (env.CHANGE_BRANCH ?: env.BRANCH_NAME).split('/')[1].tokenize('-')[0..1].join('-') : ''}"
   }
 
   stages {
@@ -60,7 +66,10 @@ pipeline {
       // Only for ticket branches -- `dev`/`beta`/`prod` builds triggered by
       // other means (e.g. a manual re-run) shouldn't re-merge or re-promote.
       when {
-        expression { env.BRANCH_NAME ==~ /feature\/.*|bugfix\/.*|chore\/.*/ }
+        // See the CHANGE_BRANCH note on JIRA_TICKET above -- on a PR build
+        // (the only kind that reaches this point) BRANCH_NAME is PR-N, not
+        // the ticket branch name, so it can never match this guard alone.
+        expression { (env.CHANGE_BRANCH ?: env.BRANCH_NAME) ==~ /feature\/.*|bugfix\/.*|chore\/.*/ }
       }
       steps {
         // Auto-merge to dev -- no Jira transition needed to reach this point,
@@ -124,7 +133,7 @@ pipeline {
   post {
     failure {
       script {
-        if (env.BRANCH_NAME ==~ /feature\/.*|bugfix\/.*|chore\/.*/) {
+        if ((env.CHANGE_BRANCH ?: env.BRANCH_NAME) ==~ /feature\/.*|bugfix\/.*|chore\/.*/) {
           // Ticket never left In Progress on this run, so there's nothing to
           // transition back -- just post attributable evidence and ask
           // ScrumMaster to redispatch the ticket's own recorded owner. The
