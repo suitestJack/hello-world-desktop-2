@@ -30,6 +30,12 @@ pipeline {
   }
 
   environment {
+    // Matches config/projects.json's `name` for jiraProjectKey HWD2 and the
+    // live aigang:gateway:hello-world-desktop / aigang:agent:hello-world-desktop:*
+    // Redis keys ScrumMaster already routes through -- NOT the GitHub repo's
+    // own "hello-world-desktop-2" name.
+    PROJECT_NAME = 'hello-world-desktop'
+
     // For a PR-triggered multibranch build, BRANCH_NAME is the PR
     // pseudo-branch (PR-1, PR-2, ...) -- the real head branch name is
     // CHANGE_BRANCH instead. Since gitHubBranchDiscovery excludes branches
@@ -74,7 +80,12 @@ pipeline {
       steps {
         // Auto-merge to dev -- no Jira transition needed to reach this point,
         // Jenkins' own test gate is the only gate.
-        sh 'gh pr merge --squash --auto'
+        //
+        // Jenkins checks out PR builds as a detached-HEAD merge commit, so
+        // gh has no current branch to infer the PR from -- pass CHANGE_ID
+        // (the PR number, set by github-branch-source for PR builds)
+        // explicitly rather than relying on branch inference.
+        sh 'gh pr merge "$CHANGE_ID" --squash --auto'
 
         // Promote the merge straight to beta. Branches make batching free:
         // this is a fast-forward, not a rebuild -- beta always mirrors dev.
@@ -98,17 +109,19 @@ pipeline {
         // TODO: replace yourdomain.com with this project's actual BETA_DOMAIN
         // once it's provisioned.
         //
-        // jira:3.21's jiraComment step only takes issueKey/body — there is
-        // no `site` param on this plugin version (it assumes the sole
-        // globally-configured Jira site) — and the plugin has no
-        // jiraTransition step at all. So the transition below goes through
-        // Jira's REST API directly instead, the same way jira.js's own
-        // transitionIssue() does: look up the transition id whose target
-        // status is "In Review" by name, then fire it.
-        jiraComment(
-          issueKey: "${JIRA_TICKET}",
-          body: "Deployed to beta.\n\nBeta URL: https://${env.PROJECT_NAME}.beta.yourdomain.com\nSHA: ${env.DEPLOYED_SHA}\nBuild: ${env.BUILD_IDENTIFIER}"
-        )
+        // jira:3.21's jiraComment step fails here with "[Jira] Failed to
+        // connect to Jira" (same failure observed from the post{failure{}}
+        // block below, and it has no site param on this plugin version nor
+        // any jiraTransition step at all) -- go through Jira's REST API
+        // directly instead, the same way jira.js's postComment() and
+        // transitionIssue() do.
+        sh '''
+          COMMENT_TEXT=$(printf 'Deployed to beta.\n\nBeta URL: https://%s.beta.yourdomain.com\nSHA: %s\nBuild: %s' "$PROJECT_NAME" "$DEPLOYED_SHA" "$BUILD_IDENTIFIER")
+          curl -s -u "$JIRA_EMAIL:$JIRA_TOKEN" -X POST \
+              -H 'Content-Type: application/json' \
+              -d "$(jq -n --arg text "$COMMENT_TEXT" '{body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:$text}]}]}}')" \
+              "$JIRA_URL/rest/api/3/issue/$JIRA_TICKET/comment"
+        '''
 
         // Evidence is posted -- now, and only now, move the ticket to In
         // Review. This is the single place a ticket leaves In Progress on
@@ -139,10 +152,20 @@ pipeline {
           // ScrumMaster to redispatch the ticket's own recorded owner. The
           // message never names an agent (REQ-11) -- ScrumMaster is the only
           // thing allowed to decide who that is.
-          jiraComment(
-            issueKey: "${JIRA_TICKET}",
-            body: "Pipeline failed. Build log: ${env.BUILD_URL}\n\nPlease review and fix."
-          )
+          //
+          // jira:3.21's jiraComment step fails here with "[Jira] Failed to
+          // connect to Jira" -- manual curl/jq checks confirm Jira is
+          // reachable from this container, so the plugin's own error message
+          // is a generic catch-all that doesn't reflect real connectivity.
+          // Go through the REST API directly instead, same as the
+          // transition above and jira.js's postComment().
+          sh '''
+            COMMENT_TEXT=$(printf 'Pipeline failed. Build log: %s\n\nPlease review and fix.' "$BUILD_URL")
+            curl -s -u "$JIRA_EMAIL:$JIRA_TOKEN" -X POST \
+                -H 'Content-Type: application/json' \
+                -d "$(jq -n --arg text "$COMMENT_TEXT" '{body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:$text}]}]}}')" \
+                "$JIRA_URL/rest/api/3/issue/$JIRA_TICKET/comment"
+          '''
           sh """
             redis-cli -h \$REDIS_HOST publish jira-gateway:\$PROJECT_NAME '{"type":"pipeline_retry","ticket_key":"${JIRA_TICKET}","build_url":"${env.BUILD_URL}","build_number":"${env.BUILD_NUMBER}"}'
           """
