@@ -1,0 +1,130 @@
+// Jenkinsfile — hello-world-desktop-2
+//
+// Implements the full per-story flow from strategy/v1.0/features/release-workflow.md:
+//   PR opened -> Jenkins runs tests (github-branch-source posts the commit
+//   status automatically) -> tests pass -> auto-merge to `dev`, promote that
+//   merge straight to `beta`, deploy beta's new build to the Beta VM --
+//   no human step, no Jira transition required for any of it.
+//
+// The ticket stays "In Progress" for the whole pipeline run (REQ-10). Jenkins
+// is the only thing that ever moves it to "In Review", and only once the
+// deploy above has actually succeeded and its evidence (beta URL, SHA, build
+// identifier) is posted -- never on PR-open. On failure, Jenkins posts
+// attributable evidence and publishes a `pipeline_retry` message to
+// ScrumMaster over the same jira-gateway Redis channel agents use (REQ-11) --
+// it never asserts an agent owner; ScrumMaster looks up the ticket's own
+// recorded Agent field and redispatches that agent. This does not depend on
+// any Jira status webhook.
+//
+// Release preview and production promotion are NOT handled here -- they're
+// separate, centrally-defined Jenkins jobs (release-candidate,
+// production-promote, release-preview-teardown; see jenkins/jenkins.yaml)
+// triggered from a Jira Release ticket, batching whatever has landed on
+// `beta` across possibly many runs of this pipeline.
+
+pipeline {
+  agent any
+
+  options {
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
+
+  environment {
+    // feature/GANG-42-password-reset -> GANG-42
+    JIRA_TICKET = "${env.BRANCH_NAME?.contains('/') ? env.BRANCH_NAME.split('/')[1].tokenize('-')[0..1].join('-') : ''}"
+  }
+
+  stages {
+    stage('Install') {
+      steps {
+        sh 'npm ci'
+      }
+    }
+
+    stage('Test') {
+      steps {
+        // No unit-test framework configured yet for this project (see
+        // src/CLAUDE.md) -- the build gate below is what actually validates
+        // changes today. Replace with a real test command once one exists.
+        echo 'No test suite configured yet — build is the current gate.'
+      }
+    }
+
+    stage('Build') {
+      steps {
+        sh 'npm run build'
+      }
+    }
+
+    stage('Merge, promote to beta, and deploy') {
+      // Only for ticket branches -- `dev`/`beta`/`prod` builds triggered by
+      // other means (e.g. a manual re-run) shouldn't re-merge or re-promote.
+      when {
+        expression { env.BRANCH_NAME ==~ /feature\/.*|bugfix\/.*|chore\/.*/ }
+      }
+      steps {
+        // Auto-merge to dev -- no Jira transition needed to reach this point,
+        // Jenkins' own test gate is the only gate.
+        sh 'gh pr merge --squash --auto'
+
+        // Promote the merge straight to beta. Branches make batching free:
+        // this is a fast-forward, not a rebuild -- beta always mirrors dev.
+        sh '''
+          git fetch origin dev
+          git push origin origin/dev:refs/heads/beta
+        '''
+
+        // TODO: no Beta VM is provisioned for this project yet (BETA_VM_HOST /
+        // PREVIEW_DOMAIN unset in ~/ai-gang/.env). Fill in once the Beta VM
+        // remote-deploy mechanism (beta-vm/README.md) is set up for this repo:
+        //   sh "ssh beta-deploy@\$BETA_VM_HOST deploy ${env.PROJECT_NAME} \$(git rev-parse origin/dev)"
+        echo 'TODO: deploy this build to the Beta VM'
+
+        script {
+          env.DEPLOYED_SHA = sh(script: 'git rev-parse origin/dev', returnStdout: true).trim()
+          env.BUILD_IDENTIFIER = "${env.PROJECT_NAME}-${env.DEPLOYED_SHA.take(7)}-${env.BUILD_NUMBER}"
+        }
+        // Beta URL is <project>.<BETA_DOMAIN> — deploy.sh routes it through
+        // Traefik on the Beta VM under that same hostname (beta-vm/README.md).
+        // TODO: replace yourdomain.com with this project's actual BETA_DOMAIN
+        // once it's provisioned.
+        jiraComment(
+          site: 'ai-gang-jira',
+          issueKey: "${JIRA_TICKET}",
+          body: "Deployed to beta.\n\nBeta URL: https://${env.PROJECT_NAME}.beta.yourdomain.com\nSHA: ${env.DEPLOYED_SHA}\nBuild: ${env.BUILD_IDENTIFIER}"
+        )
+
+        // Evidence is posted -- now, and only now, move the ticket to In
+        // Review. This is the single place a ticket leaves In Progress on
+        // the happy path (REQ-10).
+        jiraTransition(
+          site: 'ai-gang-jira',
+          issueKey: "${JIRA_TICKET}",
+          transitionId: 'In Review'
+        )
+      }
+    }
+  }
+
+  post {
+    failure {
+      script {
+        if (env.BRANCH_NAME ==~ /feature\/.*|bugfix\/.*|chore\/.*/) {
+          // Ticket never left In Progress on this run, so there's nothing to
+          // transition back -- just post attributable evidence and ask
+          // ScrumMaster to redispatch the ticket's own recorded owner. The
+          // message never names an agent (REQ-11) -- ScrumMaster is the only
+          // thing allowed to decide who that is.
+          jiraComment(
+            site: 'ai-gang-jira',
+            issueKey: "${JIRA_TICKET}",
+            body: "Pipeline failed. Build log: ${env.BUILD_URL}\n\nPlease review and fix."
+          )
+          sh """
+            redis-cli -h \$REDIS_HOST publish jira-gateway:\$PROJECT_NAME '{"type":"pipeline_retry","ticket_key":"${JIRA_TICKET}","build_url":"${env.BUILD_URL}","build_number":"${env.BUILD_NUMBER}"}'
+          """
+        }
+      }
+    }
+  }
+}
