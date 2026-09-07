@@ -219,7 +219,7 @@ pipeline {
         // beta-vm/deploy/deploy.sh expects, so nothing about the image or the
         // build changes when this is swapped for a real Beta VM deploy later.
         sh '''
-          SHORT_SHA=${PROMOTE_SHA:0:7}
+          SHORT_SHA=$(printf '%.7s' "$PROMOTE_SHA")
           docker build -f Dockerfile.beta -t "beta-hello-world-desktop-2:$SHORT_SHA" -t beta-hello-world-desktop-2:latest .
           docker rm -f beta-hello-world-desktop-2 >/dev/null 2>&1 || true
           docker run -d --name beta-hello-world-desktop-2 \
