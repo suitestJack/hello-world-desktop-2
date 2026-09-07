@@ -211,11 +211,26 @@ pipeline {
           sh 'git push origin "$PROMOTE_SHA:refs/heads/beta"'
         }
 
-        // TODO: no Beta VM is provisioned for this project yet (BETA_VM_HOST /
-        // PREVIEW_DOMAIN unset in ~/ai-gang/.env). Fill in once the Beta VM
-        // remote-deploy mechanism (beta-vm/README.md) is set up for this repo:
+        // Interim: no Beta VM is provisioned for this project yet (BETA_VM_HOST /
+        // PREVIEW_DOMAIN unset in ~/ai-gang/.env). Per docs/release-strategy.md's
+        // "Container fallback on the Development VM", deploy this same build as a
+        // container on the Development VM instead -- Dockerfile.beta builds the
+        // production bundle and serves it on the same internal port (8080)
+        // beta-vm/deploy/deploy.sh expects, so nothing about the image or the
+        // build changes when this is swapped for a real Beta VM deploy later.
+        sh '''
+          SHORT_SHA=${PROMOTE_SHA:0:7}
+          docker build -f Dockerfile.beta -t "beta-hello-world-desktop-2:$SHORT_SHA" -t beta-hello-world-desktop-2:latest .
+          docker rm -f beta-hello-world-desktop-2 >/dev/null 2>&1 || true
+          docker run -d --name beta-hello-world-desktop-2 \
+            --restart unless-stopped \
+            -p 8082:8080 \
+            --label "project=hello-world-desktop-2" \
+            --label "sha=$SHORT_SHA" \
+            "beta-hello-world-desktop-2:$SHORT_SHA"
+        '''
+        // Once a real Beta VM is provisioned, replace the block above with:
         //   sh "ssh beta-deploy@\$BETA_VM_HOST deploy ${env.PROJECT_NAME} ${env.PROMOTE_SHA}"
-        echo 'TODO: deploy this build to the Beta VM once it is provisioned'
 
         script {
           env.DEPLOYED_SHA = env.PROMOTE_SHA
@@ -227,9 +242,11 @@ pipeline {
     stage('Post evidence and move to In Review') {
       when { expression { env.PIPELINE_KIND == 'dev' && env.PROMOTE_SHA != env.BETA_SHA && env.PROMOTE_TICKETS } }
       steps {
-        // Beta URL is <project>.<BETA_DOMAIN> -- deploy.sh routes it through
-        // Traefik on the Beta VM under that same hostname (beta-vm/README.md).
-        // TODO: replace yourdomain.com with this project's actual BETA_DOMAIN
+        // Beta URL is normally <project>.<BETA_DOMAIN>, routed through Traefik
+        // on the Beta VM (beta-vm/README.md). Interim: while beta runs as a
+        // container on the Development VM instead (see the "Promote to beta
+        // and deploy" stage above), point testers at that container's LAN URL
+        // -- update this once a real Beta VM and BETA_DOMAIN exist.
         //
         // jira:3.21's jiraComment step reports "[Jira] Failed to connect to
         // Jira" from here even though Jira is reachable, and the plugin has
@@ -242,8 +259,8 @@ pipeline {
         // already reviewed or Done) keeps its evidence and its status.
         sh '''
           for ticket in $PROMOTE_TICKETS; do
-            COMMENT_TEXT=$(printf 'Deployed to beta.\\n\\nBeta URL: https://%s.beta.yourdomain.com\\nSHA: %s\\nBuild: %s\\nBuild log: %s' \
-                "$PROJECT_NAME" "$DEPLOYED_SHA" "$BUILD_IDENTIFIER" "$BUILD_URL")
+            COMMENT_TEXT=$(printf 'Deployed to beta.\\n\\nBeta URL: http://192.168.1.116:8082\\nSHA: %s\\nBuild: %s\\nBuild log: %s' \
+                "$DEPLOYED_SHA" "$BUILD_IDENTIFIER" "$BUILD_URL")
             curl -sS --fail-with-body -u "$JIRA_EMAIL:$JIRA_TOKEN" -X POST \
                 -H 'Content-Type: application/json' \
                 -d "$(jq -n --arg text "$COMMENT_TEXT" '{body:{type:"doc",version:1,content:[{type:"paragraph",content:[{type:"text",text:$text}]}]}}')" \
