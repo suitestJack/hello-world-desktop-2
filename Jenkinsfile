@@ -175,14 +175,17 @@ pipeline {
         // Jenkins checks PR builds out as a detached-HEAD merge commit, so
         // gh can't infer the PR from a branch -- pass CHANGE_ID explicitly.
         // Idempotent: a re-run of a build whose PR already has auto-merge
-        // queued leaves it alone.
+        // queued leaves it alone. Ask gh for a boolean: its --jq prints a JSON
+        // null as an empty string, not the literal "null", so comparing the
+        // raw autoMergeRequest object against "null" never matches and the
+        // merge is silently skipped.
         //
         // The squash subject is pinned to "<PR title> (#N)" so the ticket
         // key the agent put in the PR title is always in dev's history --
         // the dev build's last-resort fallback for finding the ticket.
         sh '''
-          AUTO_MERGE=$(gh pr view "$CHANGE_ID" --json autoMergeRequest --jq '.autoMergeRequest')
-          if [ "$AUTO_MERGE" = "null" ]; then
+          AUTO_MERGE=$(gh pr view "$CHANGE_ID" --json autoMergeRequest --jq '.autoMergeRequest != null')
+          if [ "$AUTO_MERGE" != "true" ]; then
             gh pr merge "$CHANGE_ID" --squash --auto --subject "$CHANGE_TITLE (#$CHANGE_ID)"
           else
             echo "auto-merge already queued for PR #$CHANGE_ID"
