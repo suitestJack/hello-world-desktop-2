@@ -56,6 +56,30 @@ button:focus-visible {
   outline: 2px solid #162018;
   outline-offset: 2px;
 }
+.actions {
+  /* Keeps Click Me and Reset side by side, wrapping on narrow windows. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+}
+.reset {
+  /* Secondary to Click Me -- clearing the count is the less common action. */
+  color: #40734c;
+  background: #fff;
+  border-color: #b9cab9;
+}
+.reset:hover {
+  color: #35603f;
+  background: #e7efe6;
+}
+.reset:disabled {
+  color: #97a89b;
+  background: #fff;
+  border-color: #dae3d9;
+  cursor: default;
+}
 .count {
   margin: 0;
   color: #40734c;
