@@ -66,3 +66,12 @@ button:focus-visible {
   color: #40734c;
   font-variant-numeric: tabular-nums;
 }
+.last-incremented {
+  margin: 0;
+  color: #5b6b5f;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.last-incremented .never {
+  font-style: italic;
+}
