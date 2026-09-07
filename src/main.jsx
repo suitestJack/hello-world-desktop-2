@@ -17,18 +17,38 @@ function App() {
   const [count, setCount] = useState(0);
   const [lastIncremented, setLastIncremented] = useState(null);
 
+  // Nothing has been counted yet, so Reset has no work to do.
+  const isPristine = count === 0 && lastIncremented === null;
+
   function increment() {
     setCount((value) => value + 1);
     setLastIncremented(new Date());
+  }
+
+  // Puts the counter back to the state it renders in on a fresh load: both the
+  // count and the timestamp are cleared together so they never disagree.
+  function reset() {
+    setCount(0);
+    setLastIncremented(null);
   }
 
   return (
     <main>
       <p className="eyebrow">AI Gang desktop template</p>
       <div className="counter">
-        <button type="button" onClick={increment}>
-          Click Me
-        </button>
+        <div className="actions">
+          <button type="button" onClick={increment}>
+            Click Me
+          </button>
+          <button
+            type="button"
+            className="reset"
+            onClick={reset}
+            disabled={isPristine}
+          >
+            Reset
+          </button>
+        </div>
         <p className="count" aria-live="polite">
           Clicked {count} {count === 1 ? 'time' : 'times'}
         </p>
