@@ -2,8 +2,20 @@ import React, { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
+// Renders a Date as "YYYY-MM-DD HH:MM:SS UTC" so the value is stable across
+// machine timezones (browser and native shell alike).
+function formatUtc(date) {
+  return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
+}
+
 function App() {
   const [count, setCount] = useState(0);
+  const [lastIncremented, setLastIncremented] = useState(null);
+
+  function increment() {
+    setCount((value) => value + 1);
+    setLastIncremented(new Date());
+  }
 
   return (
     <main>
@@ -14,11 +26,21 @@ function App() {
         shell for Windows, macOS, and Linux.
       </p>
       <div className="counter">
-        <button type="button" onClick={() => setCount((value) => value + 1)}>
+        <button type="button" onClick={increment}>
           Click Me
         </button>
         <p className="count" aria-live="polite">
           Clicked {count} {count === 1 ? 'time' : 'times'}
+        </p>
+        <p className="last-incremented" aria-live="polite">
+          Last Incremented:{' '}
+          {lastIncremented ? (
+            <time dateTime={lastIncremented.toISOString()}>
+              {formatUtc(lastIncremented)}
+            </time>
+          ) : (
+            <span className="never">never</span>
+          )}
         </p>
       </div>
     </main>
