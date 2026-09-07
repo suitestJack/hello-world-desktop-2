@@ -75,3 +75,10 @@ button:focus-visible {
 .last-incremented .never {
   font-style: italic;
 }
+.build-number {
+  /* Sits tight under "Last Incremented" rather than reading as its own row. */
+  margin: -0.5rem 0 0;
+  color: #66756a;
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}

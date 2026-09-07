@@ -8,6 +8,11 @@ function formatUtc(date) {
   return `${date.toISOString().slice(0, 19).replace('T', ' ')} UTC`;
 }
 
+// Baked in at build time so the running page can be traced back to the CI build
+// that produced it. Unset for local `npm run dev` / `npm run build`, which is
+// not a numbered build -- say so rather than showing a misleading number.
+const BUILD_NUMBER = import.meta.env.VITE_BUILD_NUMBER || 'local';
+
 function App() {
   const [count, setCount] = useState(0);
   const [lastIncremented, setLastIncremented] = useState(null);
@@ -42,6 +47,7 @@ function App() {
             <span className="never">never</span>
           )}
         </p>
+        <p className="build-number">Build: {BUILD_NUMBER}</p>
       </div>
     </main>
   );
